@@ -1,0 +1,10 @@
+# files
+.env
+gcs-credentials.json
+.venv
+
+# folders
+.claude
+backups
+restore-test-setup
+docs

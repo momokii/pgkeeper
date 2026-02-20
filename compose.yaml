@@ -1,0 +1,74 @@
+# Unified PostgreSQL Backup Service
+# Single container replacing the old two-container architecture
+version: "3.8"
+
+services:
+  postgres-backup:
+    # build:
+    #   context: .
+    #   dockerfile: Dockerfile
+    container_name: postgres_backup_unified
+    image: postgres-backup-gcp:latest
+    restart: unless-stopped
+
+    environment:
+      # PostgreSQL connection (same as before)
+      POSTGRES_HOST: ${POSTGRES_HOST:-postgres}
+      POSTGRES_PORT: ${POSTGRES_PORT:-5432}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+
+      # Backup configuration (same as before)
+      BACKUP_BASE_NAME: ${BACKUP_BASE_NAME:-postgres_db}
+      BACKUP_RETENTION_DAILY: ${BACKUP_RETENTION_DAILY:-7}
+      BACKUP_RETENTION_WEEKLY: ${BACKUP_RETENTION_WEEKLY:-4}
+      BACKUP_COMPRESSION_LEVEL: ${BACKUP_COMPRESSION_LEVEL:-9}
+      BACKUP_DIR: /backups
+
+      # GCS configuration (replaces TOS)
+      GCS_BUCKET_NAME: ${GCS_BUCKET_NAME:-}
+      GCS_CREDENTIALS_PATH: /gcs-credentials/credentials.json
+      GCS_BACKUP_PREFIX: ${GCS_BACKUP_PREFIX:-backups/postgres}
+      GCS_UPLOAD_RETRY_MAX: ${GCS_UPLOAD_RETRY_MAX:-3}
+
+      # Logging
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+
+    volumes:
+      # Backup storage
+      - ./backups/postgres:/backups
+
+      # GCS service account credentials (mounted read-only)
+      - ${GCS_CREDENTIALS_FILE:-./gcs-credentials.json}:/gcs-credentials/credentials.json:ro
+
+      # Optional: Log directory
+      # - ./logs:/var/log
+
+      # Optional: Timezone sync
+      - /etc/localtime:/etc/localtime:ro
+
+    networks:
+      - shared-network-postgresql
+
+    # Resource limits (same as before)
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: "0.5"
+        reservations:
+          memory: 128M
+          cpus: "0.1"
+
+    # Health check
+    healthcheck:
+      test: ["CMD", "pgrep", "-f", "python.*entrypoint.py"]
+      interval: 30s
+      timeout: 10s
+      start_period: 5s
+      retries: 3
+
+networks:
+  shared-network-postgresql:
+    external: true
