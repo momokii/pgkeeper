@@ -43,15 +43,6 @@ A Docker-based automated backup system for PostgreSQL databases. Now with a unif
 └─────────────────────────────────────────────────────────────┘
 ```
 
-### Previous (v1.x) - Bash + Python
-
-The previous version used:
-- Bash scripts for backup/restore (cron-based)
-- Python scripts for cloud operations (TOS BytePlus)
-- Two separate Docker containers
-
-See [Migration Guide](docs/MIGRATION_GUIDE.md) for details on upgrading.
-
 ## Directory Structure
 
 ```
@@ -266,15 +257,6 @@ python scripts/cli.py download backups/postgres/daily/backup.dump
 # Test GCS connection
 python scripts/cli.py test
 ```
-
-## Documentation
-
-| Document | Description |
-|----------|-------------|
-| [GCP Setup Guide](docs/GCP_SETUP.md) | Google Cloud Platform setup instructions |
-| [Migration Guide](docs/MIGRATION_GUIDE.md) | Migrating from v1.x (Bash+Python) to v2.0 (Python-only) |
-| [Backup Strategy](docs/postgres-backup-strategy.md) | Architecture and disaster recovery |
-| [Restore Testing](docs/postgres-restore-testing.md) | Restore procedures and validation |
 
 ## Requirements
 
