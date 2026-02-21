@@ -1,23 +1,22 @@
 # PostgreSQL Backup Scheduler
 
-A Docker-based automated backup system for PostgreSQL databases. Now with a unified Python application replacing the previous Bash + Python architecture.
+A Docker-based automated backup system for PostgreSQL databases with unified Python application.
 
 ## Features
 
 - **Unified Python application** - Single codebase for all operations
-- Automated daily and weekly backups (APScheduler-based, no cron dependency)
-- Compressed custom-format dumps (`pg_dump -Fc`) with configurable compression level
-- SHA-256 checksums and JSON metadata for every backup
-- Configurable retention policy (default: 7 daily, 4 weekly)
+- **APScheduler-based scheduling** - No cron dependency, fully configurable intervals
+- **Compressed custom-format dumps** (`pg_dump -Fc`) with configurable compression level
+- **SHA-256 checksums** and JSON metadata for every backup
+- **Dual retention policy** - Separate policies for local and cloud storage
 - **Cloud backup integration** with Google Cloud Storage (optional)
-- **Automatic upload to cloud storage** with duplicate prevention
+- **Automatic upload to cloud storage** with duplicate prevention via upload registry
 - **Cloud download for disaster recovery**
-- Isolated restore testing environment with zero production impact
-- General-purpose 9-check restore validation (works with any PostgreSQL database)
+- **Python-based restore testing** - Isolated environment with zero production impact
+- **9-point restore validation** - Works with any PostgreSQL database
+- **Upload status tracking** - Check which backups are uploaded vs pending
 
 ## Architecture
-
-### Current (v2.0) - Python-Only
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -43,49 +42,7 @@ A Docker-based automated backup system for PostgreSQL databases. Now with a unif
 └─────────────────────────────────────────────────────────────┘
 ```
 
-## Directory Structure
-
-```
-backup-postgres/
-├── docker-compose-unified.yaml   # New unified service
-├── Dockerfile                   # Python 3.12 + postgresql-client
-├── pyproject.toml               # Python dependencies
-├── .env                         # Database & GCS credentials (gitignored)
-├── src/backup_postgres/         # Python application
-│   ├── config/
-│   │   └── settings.py         # Configuration management
-│   ├── core/
-│   │   ├── backup.py           # BackupManager
-│   │   ├── restore.py          # RestoreManager + 9-point validation
-│   │   ├── retention.py        # RetentionPolicy
-│   │   ├── metadata.py         # Metadata generator
-│   │   └── models.py          # Data models
-│   ├── cloud/
-│   │   ├── gcs_storage.py     # GCS operations
-│   │   └── registry.py        # Upload registry
-│   ├── scheduler/
-│   │   └── jobs.py            # APScheduler setup
-│   └── utils/
-│       ├── logging.py          # Structured logging
-│       ├── checksum.py         # SHA-256 calculation
-│       ├── subprocess.py       # pg_dump/pg_restore wrappers
-│       └── exceptions.py      # Custom exceptions
-├── scripts-new/
-│   ├── entrypoint.py         # Main daemon entry point
-│   └── cli.py               # CLI commands
-├── scripts/                     # Legacy scripts (v1.x)
-├── restore-test-setup/          # Isolated restore test environment
-├── backups/                     # Backup storage (gitignored)
-│   ├── daily/                   # Daily backups (.dump + .json)
-│   ├── weekly/                  # Weekly backups (.dump + .json)
-│   └── manual/                  # Manual backups (.dump + .json)
-└── docs/                        # Documentation
-    ├── GCP_SETUP.md             # Google Cloud setup guide
-    ├── MIGRATION_GUIDE.md        # Migration from v1.x
-    └── ...                       # Other documentation
-```
-
-## Quick Start (v2.0)
+## Quick Start
 
 ### 1. Configure Environment
 
@@ -102,8 +59,7 @@ export GCS_BUCKET_NAME=your-bucket-name
 ### 2. Start Backup Service
 
 ```bash
-# Using the new unified service
-docker compose -f docker-compose-unified.yaml up -d
+docker compose -f compose.yaml up -d
 ```
 
 ### 3. Manual Operations
@@ -115,6 +71,9 @@ docker exec postgres_backup_unified python /app/scripts/cli.py backup --type man
 # List local backups
 docker exec postgres_backup_unified python /app/scripts/cli.py list
 
+# Check upload status
+docker exec postgres_backup_unified python /app/scripts/cli.py status
+
 # List cloud backups
 docker exec postgres_backup_unified python /app/scripts/cli.py list --cloud
 
@@ -124,11 +83,13 @@ docker exec postgres_backup_unified python /app/scripts/cli.py test
 
 ## Backup Schedule
 
-| Type | Schedule | Retention |
-|------|----------|-----------|
-| Daily | 2:00 AM UTC | 7 most recent |
-| Weekly | 3:00 AM Sunday UTC | 4 most recent |
-| Manual | On-demand | No auto-cleanup |
+| Type | Schedule | Local Retention | Cloud Retention |
+|------|----------|-----------------|-----------------|
+| Daily | 2:00 AM UTC | 7 most recent | Optional* |
+| Weekly | 3:00 AM Sunday UTC | 4 most recent | Optional* |
+| Manual | On-demand | No auto-cleanup | No auto-cleanup |
+
+*Cloud retention is **disabled by default** - set `GCS_RETENTION_ENABLED=true` to enable
 
 ## Configuration
 
@@ -146,9 +107,16 @@ docker exec postgres_backup_unified python /app/scripts/cli.py test
 
 | Environment Variable | Default | Description |
 |---------------------|---------|-------------|
-| `BACKUP_RETENTION_DAILY` | `7` | Number of daily backups to keep |
-| `BACKUP_RETENTION_WEEKLY` | `4` | Number of weekly backups to keep |
+| `BACKUP_BASE_NAME` | `postgres_db` | Prefix for backup filenames |
+| `BACKUP_RETENTION_DAILY` | `7` | Number of daily backups to keep locally |
+| `BACKUP_RETENTION_WEEKLY` | `4` | Number of weekly backups to keep locally |
 | `BACKUP_COMPRESSION_LEVEL` | `9` | pg_dump compression level (0-9) |
+
+### Scheduler Options
+
+| Environment Variable | Default | Description |
+|---------------------|---------|-------------|
+| `SCHEDULER_SYNC_INTERVAL_SECONDS` | `1800` | Cloud sync check interval (30 minutes) |
 
 ### GCS Cloud Backup (Optional)
 
@@ -158,6 +126,9 @@ docker exec postgres_backup_unified python /app/scripts/cli.py test
 | `GCS_CREDENTIALS_PATH` | `/gcs-credentials/credentials.json` | Service account JSON path |
 | `GCS_BACKUP_PREFIX` | `backups/postgres` | Path prefix in bucket |
 | `GCS_UPLOAD_RETRY_MAX` | `3` | Max upload retry attempts |
+| `GCS_RETENTION_ENABLED` | `false` | Enable cloud retention cleanup (opt-in) |
+| `GCS_RETENTION_DAILY` | `30` | Daily backups to keep in cloud (if enabled) |
+| `GCS_RETENTION_WEEKLY` | `90` | Weekly backups to keep in cloud (if enabled) |
 
 ### Logging
 
@@ -188,7 +159,7 @@ volumes:
 ### 4. Start Service
 
 ```bash
-docker compose -f docker-compose-unified.yaml up -d
+docker compose -f compose.yaml up -d
 ```
 
 ## Restore Testing
@@ -199,6 +170,8 @@ The restore test runs in a fully isolated environment (separate database, networ
 
 ```bash
 cd restore-test-setup
+cp .env.example .env
+# Edit .env to set RESTORE_BACKUP_FILE
 docker compose up --abort-on-container-exit
 ```
 
@@ -214,6 +187,8 @@ cat restore-test-setup/restore-results/validation-report.json
 cd restore-test-setup
 docker compose down -v
 ```
+
+See [restore-test-setup/README.md](restore-test-setup/README.md) for more details.
 
 ### Validation Checks
 
@@ -247,6 +222,9 @@ python scripts/cli.py list
 python scripts/cli.py list --type daily
 python scripts/cli.py list --cloud --json
 
+# Check upload status
+python scripts/cli.py status
+
 # Upload to cloud
 python scripts/cli.py upload --file /path/to/backup.dump
 python scripts/cli.py upload  # Sync all pending
@@ -258,6 +236,52 @@ python scripts/cli.py download backups/postgres/daily/backup.dump
 python scripts/cli.py test
 ```
 
+## Directory Structure
+
+```
+backup-postgres/
+├── compose.yaml                  # Unified service configuration
+├── Dockerfile                    # Python 3.12 + postgresql-client
+├── pyproject.toml                # Python dependencies
+├── .env.example                  # Environment template
+├── src/backup_postgres/          # Python application
+│   ├── config/
+│   │   └── settings.py          # Configuration management
+│   ├── core/
+│   │   ├── backup.py            # BackupManager
+│   │   ├── restore.py           # RestoreManager + validation
+│   │   ├── retention.py         # RetentionPolicy
+│   │   └── metadata.py          # Metadata generator
+│   ├── cloud/
+│   │   ├── gcs_storage.py       # GCS operations
+│   │   └── registry.py          # Upload registry
+│   ├── scheduler/
+│   │   └── jobs.py             # APScheduler setup
+│   └── utils/
+│       ├── logging.py           # Structured logging
+│       ├── checksum.py          # SHA-256 calculation
+│       └── exceptions.py        # Custom exceptions
+├── scripts/
+│   ├── entrypoint.py            # Main daemon entry point
+│   ├── cli.py                  # CLI commands
+│   └── restore_test.py          # Restore test script
+├── restore-test-setup/          # Isolated restore test environment
+│   ├── compose.yaml            # Test environment configuration
+│   ├── .env.example            # Test environment template
+│   └── README.md               # Test setup documentation
+├── backups/                     # Backup storage (gitignored)
+│   ├── daily/                  # Daily backups (.dump + .json)
+│   ├── weekly/                 # Weekly backups (.dump + .json)
+│   └── manual/                 # Manual backups (.dump + .json)
+└── docs/                        # Documentation
+    ├── PROCESS_FLOW.md         # Process flow documentation
+    └── GCP_SETUP.md            # Google Cloud setup guide
+```
+
+## Process Flow
+
+For detailed information about how backups are created, detected, and uploaded, see [docs/PROCESS_FLOW.md](docs/PROCESS_FLOW.md).
+
 ## Requirements
 
 - Docker Engine 20.10+
@@ -265,4 +289,3 @@ python scripts/cli.py test
 - PostgreSQL 12+ (client tools in container)
 - Python 3.12+
 - Google Cloud project (for cloud backup integration)
-

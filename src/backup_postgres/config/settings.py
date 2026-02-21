@@ -82,6 +82,11 @@ class GCSConfig(BaseSettings):
         default="backups/postgres", alias="GCS_BACKUP_PREFIX"
     )
     gcs_upload_retry_max: int = Field(default=3, ge=1, alias="GCS_UPLOAD_RETRY_MAX")
+    cloud_retention_enabled: bool = Field(
+        default=False, alias="GCS_RETENTION_ENABLED"
+    )
+    cloud_retention_daily: int = Field(default=30, ge=1, alias="GCS_RETENTION_DAILY")
+    cloud_retention_weekly: int = Field(default=90, ge=1, alias="GCS_RETENTION_WEEKLY")
 
     model_config = SettingsConfigDict(
         env_prefix="",
@@ -94,6 +99,21 @@ class GCSConfig(BaseSettings):
     def enabled(self) -> bool:
         """Check if GCS is configured."""
         return bool(self.gcs_bucket_name)
+
+
+class SchedulerConfig(BaseSettings):
+    """Scheduler configuration."""
+
+    sync_interval_seconds: int = Field(
+        default=1800, ge=60, alias="SCHEDULER_SYNC_INTERVAL_SECONDS"
+    )
+
+    model_config = SettingsConfigDict(
+        env_prefix="",
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
 
 
 class LoggingConfig(BaseSettings):
@@ -126,6 +146,7 @@ class Settings:
         self.postgres = PostgresConfig()
         self.backup = BackupConfig()
         self.gcs = GCSConfig()
+        self.scheduler = SchedulerConfig()
         self.logging = LoggingConfig()
         self._validate()
 

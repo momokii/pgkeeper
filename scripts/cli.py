@@ -261,13 +261,39 @@ def cmd_download(args) -> int:
 
         # Download
         gcs_key = args.key
-        output_path = Path(args.output) if args.output else Path(".")
-        output_path = output_path / gcs_key.split("/")[-1]
+
+        # Determine output path
+        if args.output:
+            # User specified custom output path
+            output_path = Path(args.output)
+            if output_path.is_dir():
+                output_path = output_path / gcs_key.split("/")[-1]
+        else:
+            # Default to /backups/{type}/ directory
+            # Parse GCS key format: backups/postgres/{type}/{filename}
+            key_parts = gcs_key.split("/")
+            if len(key_parts) >= 3:
+                backup_type = key_parts[2]  # "daily", "weekly", or "manual"
+                output_path = Path(settings.backup.backup_dir) / backup_type / gcs_key.split("/")[-1]
+            else:
+                # Fallback to root backup dir if parsing fails
+                output_path = Path(settings.backup.backup_dir) / gcs_key.split("/")[-1]
 
         result = cloud_manager.download_file(gcs_key, output_path)
 
         if result.success:
             print(f"Downloaded to: {output_path}")
+
+            # Also download the .json metadata file
+            json_key = gcs_key.replace(".dump", ".json")
+            json_output_path = output_path.with_suffix(".json")
+
+            json_result = cloud_manager.download_file(json_key, json_output_path)
+            if json_result.success:
+                print(f"Downloaded to: {json_output_path}")
+            else:
+                print(f"Warning: Metadata file not found: {json_key}", file=sys.stderr)
+
             return 0
         else:
             print(f"Download failed: {result.error}", file=sys.stderr)

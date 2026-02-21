@@ -78,17 +78,32 @@ class JobScheduler:
         )
         logger.info("Scheduled: Weekly backup on Sunday at 03:00 UTC")
 
-        # Cloud sync every 30 minutes (matching current cron: */30 * * * *)
+        # Cloud retention cleanup daily at 4 AM UTC (optional)
+        if self.cloud_manager and self.settings.gcs.cloud_retention_enabled:
+            self.scheduler.add_job(
+                func=self._cloud_retention_cleanup,
+                trigger=CronTrigger(hour=4, minute=0, timezone=UTC),
+                id="cloud_retention",
+                name="Cloud Retention Cleanup",
+                replace_existing=True,
+            )
+            logger.info("Scheduled: Cloud retention cleanup daily at 04:00 UTC")
+        elif self.cloud_manager:
+            logger.info("Cloud retention cleanup: DISABLED (set GCS_RETENTION_ENABLED=true to enable)")
+
+        # Cloud sync at configurable interval (default: 30 minutes)
         if self.cloud_manager and self.registry:
             self.scheduler.add_job(
                 func=self._sync_to_cloud,
                 trigger="interval",
-                minutes=30,
+                seconds=self.settings.scheduler.sync_interval_seconds,
                 id="cloud_sync",
                 name="Cloud Upload Sync",
                 replace_existing=True,
             )
-            logger.info("Scheduled: Cloud sync every 30 minutes")
+            logger.info(
+                f"Scheduled: Cloud sync every {self.settings.scheduler.sync_interval_seconds} seconds"
+            )
 
         # Initial cloud sync on startup
         if self.cloud_manager and self.registry:
@@ -213,6 +228,39 @@ class JobScheduler:
 
         except Exception as e:
             logger.error(f"Cloud sync failed: {e}", exc_info=True)
+
+    def _cloud_retention_cleanup(self) -> None:
+        """Execute cloud retention cleanup for all backup types."""
+        if not self.cloud_manager:
+            logger.debug("Cloud retention cleanup skipped (not configured)")
+            return
+
+        logger.info("=" * 50)
+        logger.info("Starting CLOUD retention cleanup")
+        logger.info("=" * 50)
+
+        try:
+            total_deleted = 0
+
+            # Clean each backup type
+            for backup_type in ["daily", "weekly"]:
+                # Get retention limit from settings
+                if backup_type == "daily":
+                    retention = self.settings.gcs.cloud_retention_daily
+                else:  # weekly
+                    retention = self.settings.gcs.cloud_retention_weekly
+
+                # Enforce retention
+                deleted = self.cloud_manager.enforce_retention(backup_type, retention)
+                total_deleted += len(deleted)
+
+            if total_deleted > 0:
+                logger.info(f"Cloud retention cleanup complete: {total_deleted // 2} backups deleted")
+            else:
+                logger.debug("Cloud retention cleanup complete: no backups to delete")
+
+        except Exception as e:
+            logger.error(f"Cloud retention cleanup failed: {e}", exc_info=True)
 
     def _upload_backup(
         self,

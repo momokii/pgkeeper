@@ -438,3 +438,47 @@ class CloudStorageManager:
         except Exception as e:
             logger.error(f"GCS connection test failed: {e}")
             return False
+
+    def enforce_retention(self, backup_type: str, retention_count: int) -> list[str]:
+        """
+        Delete oldest backups exceeding retention limit.
+
+        Args:
+            backup_type: Type of backup ("daily", "weekly", "manual")
+            retention_count: Number of backups to keep
+
+        Returns:
+            List of deleted GCS keys
+        """
+        backups = self.list_backups(backup_type)
+
+        if len(backups) <= retention_count:
+            logger.debug(
+                f"No cloud cleanup needed for {backup_type}: "
+                f"{len(backups)} <= {retention_count}"
+            )
+            return []
+
+        to_delete = backups[retention_count:]
+        deleted: list[str] = []
+
+        for backup in to_delete:
+            try:
+                # Delete the dump file
+                if self.delete_file(backup.key):
+                    deleted.append(backup.key)
+                    logger.debug(f"Deleted: {backup.key}")
+
+                    # Also delete the metadata file
+                    metadata_key = backup.key.replace(".dump", ".json")
+                    if self.delete_file(metadata_key):
+                        logger.debug(f"Deleted: {metadata_key}")
+
+            except Exception as e:
+                logger.error(f"Failed to delete {backup.key}: {e}")
+
+        logger.info(
+            f"Cloud retention: deleted {len(deleted) // 2} {backup_type} backups "
+            f"(kept {retention_count}, removed {len(to_delete)})"
+        )
+        return deleted
