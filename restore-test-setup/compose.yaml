@@ -1,0 +1,68 @@
+version: '3.8'
+
+# PostgreSQL Restore Testing Environment
+# Usage: docker compose -f restore-test-setup/compose.yaml up --abort-on-container-exit
+#
+# This creates a completely isolated environment for testing backup restoration.
+# NO SHARED RESOURCES with production - separate network, volumes, and ports.
+
+services:
+  # Isolated PostgreSQL instance for restore testing
+  postgres-restore-test:
+    image: postgres:15-alpine
+    container_name: postgres_restore_test
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres_restore_test}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-test_password_restore}
+      POSTGRES_DB: ${POSTGRES_DB:-postgres_restore_test}
+    ports:
+      - "${POSTGRES_TEST_PORT:-5434}:5432"
+    volumes:
+      - postgres_restore_test_data:/var/lib/postgresql/data
+    networks:
+      - postgres_restore_test_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres_restore_test} -d ${POSTGRES_DB:-postgres_restore_test}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  # Restore executor - runs Python restore and validation
+  restore-executor:
+    image: postgres-backup-gcp:latest
+    container_name: restore_executor_postgres
+    environment:
+      # PostgreSQL connection (to isolated test database)
+      POSTGRES_HOST: postgres-restore-test
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: ${POSTGRES_USER:-postgres_restore_test}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-test_password_restore}
+      POSTGRES_DB: ${POSTGRES_DB:-postgres_restore_test}
+
+      # Backup to restore
+      RESTORE_BACKUP_FILE: ${RESTORE_BACKUP_FILE:-}
+    volumes:
+      - ../backups/postgres:/backups:ro
+      - ./restore-results:/results
+    networks:
+      - postgres_restore_test_network
+    depends_on:
+      postgres-restore-test:
+        condition: service_healthy
+    command: >
+      python /app/scripts/restore_test.py
+      --backup-file /backups/${RESTORE_BACKUP_FILE}
+      --output /results/validation-report.json
+    restart: "no"
+
+# Isolated network - no connection to production
+networks:
+  postgres_restore_test_network:
+    driver: bridge
+    name: postgres_restore_test_network
+
+# Isolated volume - no connection to production data
+volumes:
+  postgres_restore_test_data:
+    name: postgres_restore_test_data

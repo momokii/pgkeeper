@@ -6,5 +6,5 @@ gcs-credentials.json
 # folders
 .claude
 backups
-restore-test-setup
+restore-test-setup/restore-results
 docs

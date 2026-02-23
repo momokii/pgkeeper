@@ -229,8 +229,11 @@ python scripts/cli.py status
 python scripts/cli.py upload --file /path/to/backup.dump
 python scripts/cli.py upload  # Sync all pending
 
-# Download from cloud
+# Download from cloud (downloads both .dump and .json files)
 python scripts/cli.py download backups/postgres/daily/backup.dump
+
+# Manually run cloud retention cleanup
+python scripts/cli.py cleanup-cloud
 
 # Test GCS connection
 python scripts/cli.py test

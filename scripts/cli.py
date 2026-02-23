@@ -431,6 +431,55 @@ def cmd_status(args) -> int:
         return 1
 
 
+def cmd_cleanup_cloud(args) -> int:
+    """Manually trigger cloud retention cleanup."""
+    try:
+        settings = load_settings()
+        setup_logging(settings, use_json=False)
+
+        if not settings.gcs.enabled:
+            print("Cloud storage not configured", file=sys.stderr)
+            return 1
+
+        if not settings.gcs.cloud_retention_enabled:
+            print("Cloud retention is disabled (set GCS_RETENTION_ENABLED=true)", file=sys.stderr)
+            return 1
+
+        cloud_manager = CloudStorageManager(settings.gcs)
+
+        print("=" * 60)
+        print("CLOUD RETENTION CLEANUP")
+        print("=" * 60)
+        print(f"Daily retention: {settings.gcs.cloud_retention_daily}")
+        print(f"Weekly retention: {settings.gcs.cloud_retention_weekly}")
+        print("")
+
+        total_deleted = 0
+
+        for backup_type in ["daily", "weekly"]:
+            if backup_type == "daily":
+                retention = settings.gcs.cloud_retention_daily
+            else:
+                retention = settings.gcs.cloud_retention_weekly
+
+            deleted = cloud_manager.enforce_retention(backup_type, retention)
+            total_deleted += len(deleted)
+
+            if deleted:
+                print(f"  {backup_type.capitalize()}: deleted {len(deleted) // 2} backups")
+            else:
+                print(f"  {backup_type.capitalize()}: no backups to delete")
+
+        print("")
+        print(f"Total: {total_deleted // 2} backups deleted")
+        return 0
+
+    except Exception as e:
+        print(f"Error: {e}", file=sys.stderr)
+        logger.error(f"Cloud retention cleanup failed: {e}", exc_info=True)
+        return 1
+
+
 def main() -> int:
     """Main CLI entry point."""
     parser = argparse.ArgumentParser(
@@ -490,6 +539,10 @@ def main() -> int:
     # Status command
     status_parser = subparsers.add_parser("status", help="Check upload status of local backups")
     status_parser.set_defaults(func=cmd_status)
+
+    # Cleanup cloud command
+    cleanup_parser = subparsers.add_parser("cleanup-cloud", help="Manually run cloud retention cleanup")
+    cleanup_parser.set_defaults(func=cmd_cleanup_cloud)
 
     # Parse arguments
     args = parser.parse_args()
